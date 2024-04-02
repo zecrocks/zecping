@@ -2,7 +2,7 @@
 
 See the gRPC response times of [Zcash Lightwalletd](https://github.com/zcash/lightwalletd) nodes.
 
-<img width="1569" alt="zecping" src="https://github.com/emersonian/zecping/assets/19352366/eff2d905-5a1b-47c7-9844-f6144424ba4e">
+<img width="1215" alt="zecping" src="https://github.com/emersonian/zecping/assets/19352366/bf69c3ea-b429-453a-af06-26dfb78dd20f">
 
 ## Installation
 
