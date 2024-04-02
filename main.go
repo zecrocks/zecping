@@ -165,7 +165,7 @@ func checkServer(serverAddr string) {
 		conn, err := grpc.DialContext(context.Background(), "passthrough:///"+host, opts...)
 		if err != nil {
 			log.Printf("Failed to connect to %s: %v", address, err)
-			fmt.Printf("FAIL: server=%s ip=%s\n", serverAddr, ip)
+			fmt.Printf("FAIL: server=%s ipv=%s ip=%s\n", serverAddr, IPVersionString, ip)
 			continue
 		}
 		defer conn.Close()
@@ -177,11 +177,11 @@ func checkServer(serverAddr string) {
 		result, err := client.GetLightdInfo(ctx, &walletrpc.Empty{})
 		if err != nil {
 			log.Printf("Could not get lightd info from %s: %v", address, err)
-			fmt.Printf("FAIL: server=%s ip=%s\n", serverAddr, ip)
+			fmt.Printf("FAIL: server=%s ipv=%s ip=%s\n", serverAddr, IPVersionString, ip)
 		} else {
 			log.Printf("Response (GetLightdInfo): %v", result)
 			duration := formatDuration(time.Since(startTime))
-			fmt.Printf("OK (%s): proto=%s server=%s height=%d lwd=%s zcd=%s ip=%s\n", duration, IPVersionString, serverAddr, result.BlockHeight, result.Version, result.ZcashdSubversion, ip)
+			fmt.Printf("OK (%s): height=%d server=%s lwd=%s zcd=%s ipv=%s ip=%s\n", duration, result.BlockHeight, serverAddr, result.Version, result.ZcashdSubversion, IPVersionString, ip)
 		}
 	}
 }
