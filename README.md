@@ -1,14 +1,25 @@
 # zecping
 
-See the response time of a Zcash Lightwalletd node.
+See the gRPC response times of [Zcash Lightwalletd](https://github.com/zcash/lightwalletd) nodes.
+
+<img width="1569" alt="zecping" src="https://github.com/emersonian/zecping/assets/19352366/eff2d905-5a1b-47c7-9844-f6144424ba4e">
 
 ## Installation
 
-Prerequisite: Golang 1.11+
+Prerequisite: Golang 1.17+
 
 ```
 go build
+./zecping -help
 ```
+### Docker
+
+```
+docker build . -t zp
+docker run -ti --rm zp zecping -addr zec.rocks:443
+```
+
+Caveat: most Docker installations do not support IPv6 right now, you may see IPv6 failures.
 
 ## Examples
 
