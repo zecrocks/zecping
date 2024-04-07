@@ -128,6 +128,7 @@ func checkServer(serverAddr string) {
 
 		var opts []grpc.DialOption
 		opts = append(opts, grpc.WithUnaryInterceptor(unaryInterceptor))
+		opts = append(opts, grpc.WithUserAgent(userAgent))
 
 		if useTLS {
 			tlsConfig := &tls.Config{
