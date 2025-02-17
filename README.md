@@ -1,8 +1,10 @@
 # zecping
 
-See the gRPC response times of [Zcash Lightwalletd](https://github.com/zcash/lightwalletd) nodes.
+See the gRPC response times of [Zaino](https://github.com/zingolabs/zaino) or [Zcash Lightwalletd](https://github.com/zcash/lightwalletd) nodes.
 
 <img width="1215" alt="zecping" src="https://github.com/emersonian/zecping/assets/19352366/bf69c3ea-b429-453a-af06-26dfb78dd20f">
+
+For a web dashboard showing server uptimes, see [Hosh](https://github.com/zecrocks/hosh).
 
 ## Installation
 
@@ -24,7 +26,7 @@ Caveat: most Docker installations do not support IPv6 right now, you may see IPv
 ## Examples
 
 ```
-./zecping -addr mainnet.lightwalletd.com:9067
+./zecping -addr zec.rocks:443
 ```
 
 You can also ping all servers in a list:
@@ -51,7 +53,7 @@ TLS is not typical over Tor since the domain name itself authenticates the remot
 Tunneling requests to sites other than Tor hidden services is also supported, useful to see if they are blocking Tor exits:
 
 ```
-./zecping -socks=127.0.0.1:9150 -timeout=30 -addr mainnet.lightwalletd.com:9067
+./zecping -socks=127.0.0.1:9150 -timeout=30 -addr zec.rocks:443
 ```
 
 ## Usage
