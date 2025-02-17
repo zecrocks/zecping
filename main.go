@@ -30,6 +30,7 @@ var (
 	connectionTimeout int
 	concurrency       int
 	verbose           bool
+	showDonation      bool
 )
 
 func init() {
@@ -44,6 +45,7 @@ func init() {
 	flag.IntVar(&connectionTimeout, "timeout", 10, "Connection timeout (seconds)")
 	flag.IntVar(&concurrency, "concurrency", 20, "Number of parallel requests to make at a time")
 	flag.BoolVar(&verbose, "v", false, "Enable verbose logging")
+	flag.BoolVar(&showDonation, "donation", false, "Show server donation address if available")
 }
 
 func main() {
@@ -182,7 +184,13 @@ func checkServer(serverAddr string) {
 		} else {
 			log.Printf("Response (GetLightdInfo): %v", result)
 			duration := formatDuration(time.Since(startTime))
-			fmt.Printf("OK (%s): height=%d server=%s lwd=%s zcd=%s ipv=%s ip=%s\n", duration, result.BlockHeight, serverAddr, result.Version, result.ZcashdSubversion, IPVersionString, ip)
+			output := fmt.Sprintf("OK (%s): height=%d server=%s lwd=%s zcd=%s ipv=%s ip=%s",
+				duration, result.BlockHeight, serverAddr, result.Version,
+				result.ZcashdSubversion, IPVersionString, ip)
+			if showDonation {
+				output += fmt.Sprintf(" donation=%s", result.DonationAddress)
+			}
+			fmt.Println(output)
 		}
 	}
 }
