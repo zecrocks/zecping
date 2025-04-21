@@ -87,11 +87,9 @@ func main() {
 			// Try to auto-detect Tor proxy by checking common ports
 			torFound := false
 			if isPortOpen("localhost:9050") {
-				socksProxy = "localhost:9050"
 				torFound = true
 				log.Info("Found open SOCKS port at localhost:9050 (Tor daemon)")
 			} else if isPortOpen("localhost:9150") {
-				socksProxy = "localhost:9150"
 				torFound = true
 				log.Info("Found open SOCKS port at localhost:9150 (Tor Browser)")
 			}
@@ -114,10 +112,12 @@ func main() {
 			for addr := range serverChan {
 				shouldUseTLS := useTLS
 				serverTimeout := connectionTimeout
+				localSocksProxy := socksProxy
 
 				host, _, err := net.SplitHostPort(addr)
-				if err == nil && strings.HasSuffix(host, ".onion") {
-					// For onion addresses, adjust TLS and timeout if not explicitly set
+				isOnionAddress := err == nil && strings.HasSuffix(host, ".onion")
+
+				if isOnionAddress {
 					if !tlsFlagExplicitlySet {
 						log.Infof("Onion address detected for %s. Disabling TLS by default.", addr)
 						shouldUseTLS = false
@@ -127,9 +127,25 @@ func main() {
 						log.Infof("Onion address detected for %s. Using increased timeout of 20 seconds.", addr)
 						serverTimeout = 20
 					}
+
+					if !socksFlagExplicitlySet && localSocksProxy == "" {
+						log.Warnf("Onion address %s requires SOCKS proxy. Using any auto-detected proxy.", addr)
+
+						if isPortOpen("localhost:9050") {
+							localSocksProxy = "localhost:9050"
+							log.Info("Found open SOCKS port at localhost:9050 (Tor daemon)")
+						} else if isPortOpen("localhost:9150") {
+							localSocksProxy = "localhost:9150"
+							log.Info("Found open SOCKS port at localhost:9150 (Tor Browser)")
+						} else {
+							log.Errorf("Cannot connect to %s: no SOCKS proxy available for .onion address", addr)
+							fmt.Printf("FAIL: server=%s reason=no_socks_proxy\n", addr)
+							continue
+						}
+					}
 				}
 
-				checkServer(addr, shouldUseTLS, serverTimeout)
+				checkServer(addr, shouldUseTLS, serverTimeout, localSocksProxy)
 			}
 		}()
 	}
@@ -157,20 +173,26 @@ func main() {
 	wg.Wait()
 }
 
-func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int) {
+func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksProxy string) {
 	host, port, err := net.SplitHostPort(serverAddr)
 	if err != nil {
 		log.Fatalf("Failed to parse host and port: %v", err)
 	}
 
+	isOnionAddress := strings.HasSuffix(host, ".onion")
+
 	var ips []net.IP
 	if socksProxy == "" {
+		if isOnionAddress {
+			log.Fatalf("Cannot connect to .onion address without a SOCKS proxy. Use -socks option.")
+		}
+
 		ips, err = net.LookupIP(host)
 		if err != nil {
 			log.Fatalf("Failed to lookup IP addresses for host: %v", err)
 		}
 	} else {
-		// Messy: just for the sake of entering the loop below
+		// Add a placeholder IP just to enter the loop below
 		ips = append(ips, net.ParseIP("127.0.0.1"))
 	}
 
@@ -266,7 +288,6 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.2fms", ms)
 }
 
-// isPortOpen checks if a TCP port is open and accepting connections at the given address
 func isPortOpen(addr string) bool {
 	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
 	if err != nil {
