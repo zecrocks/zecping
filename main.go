@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/net/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var (
@@ -62,6 +64,46 @@ func main() {
 		return
 	}
 
+	tlsFlagExplicitlySet := false
+	timeoutFlagExplicitlySet := false
+	socksFlagExplicitlySet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "tls" {
+			tlsFlagExplicitlySet = true
+		}
+		if f.Name == "timeout" {
+			timeoutFlagExplicitlySet = true
+		}
+		if f.Name == "socks" {
+			socksFlagExplicitlySet = true
+		}
+	})
+
+	if serverAddr != "" && !socksFlagExplicitlySet {
+		host, _, err := net.SplitHostPort(serverAddr)
+		if err == nil && strings.HasSuffix(host, ".onion") {
+			log.Info("Onion address detected without SOCKS proxy. Checking for Tor on common ports...")
+
+			// Try to auto-detect Tor proxy by checking common ports
+			torFound := false
+			if isPortOpen("localhost:9050") {
+				socksProxy = "localhost:9050"
+				torFound = true
+				log.Info("Found open SOCKS port at localhost:9050 (Tor daemon)")
+			} else if isPortOpen("localhost:9150") {
+				socksProxy = "localhost:9150"
+				torFound = true
+				log.Info("Found open SOCKS port at localhost:9150 (Tor Browser)")
+			}
+
+			if !torFound {
+				log.Fatal("Error: Tor must be running to test .onion addresses. Please:\n" +
+					"  1. Start Tor Browser or Tor daemon, or\n" +
+					"  2. Specify a SOCKS proxy which supports Tor using -socks=<host:port>")
+			}
+		}
+	}
+
 	serverChan := make(chan string, concurrency)
 	var wg sync.WaitGroup
 
@@ -70,7 +112,24 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for addr := range serverChan {
-				checkServer(addr)
+				shouldUseTLS := useTLS
+				serverTimeout := connectionTimeout
+
+				host, _, err := net.SplitHostPort(addr)
+				if err == nil && strings.HasSuffix(host, ".onion") {
+					// For onion addresses, adjust TLS and timeout if not explicitly set
+					if !tlsFlagExplicitlySet {
+						log.Infof("Onion address detected for %s. Disabling TLS by default.", addr)
+						shouldUseTLS = false
+					}
+
+					if !timeoutFlagExplicitlySet {
+						log.Infof("Onion address detected for %s. Using increased timeout of 20 seconds.", addr)
+						serverTimeout = 20
+					}
+				}
+
+				checkServer(addr, shouldUseTLS, serverTimeout)
 			}
 		}()
 	}
@@ -98,7 +157,7 @@ func main() {
 	wg.Wait()
 }
 
-func checkServer(serverAddr string) {
+func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int) {
 	host, port, err := net.SplitHostPort(serverAddr)
 	if err != nil {
 		log.Fatalf("Failed to parse host and port: %v", err)
@@ -132,14 +191,14 @@ func checkServer(serverAddr string) {
 		opts = append(opts, grpc.WithUnaryInterceptor(unaryInterceptor))
 		opts = append(opts, grpc.WithUserAgent(userAgent))
 
-		if useTLS {
+		if shouldUseTLS {
 			tlsConfig := &tls.Config{
 				ServerName:         host,
 				InsecureSkipVerify: allowInsecure,
 			}
 			opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 		} else {
-			opts = append(opts, grpc.WithInsecure())
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		}
 
 		var dialer func(ctx context.Context, addr string) (net.Conn, error)
@@ -149,7 +208,7 @@ func checkServer(serverAddr string) {
 				// Dialed address will be "passthrough:///...", instead dial to our resolved address
 				return net.Dial("tcp", address)
 			}
-			log.Printf("Attempting to connect to %s (%s)", serverAddr, address)
+			log.Printf("Attempting to connect to %s (%s) with TLS=%v, timeout=%ds", serverAddr, address, shouldUseTLS, serverTimeout)
 		} else {
 			socksDialer, err := proxy.SOCKS5("tcp", socksProxy, nil, proxy.Direct)
 			if err != nil {
@@ -159,13 +218,15 @@ func checkServer(serverAddr string) {
 				// Pass through the hostname and port from the CLI argument to let the proxy resolve DNS
 				return socksDialer.Dial("tcp", serverAddr)
 			}
-			log.Printf("Attempting to connect via SOCKS to %s", serverAddr)
+			log.Printf("Attempting to connect via SOCKS to %s with TLS=%v, timeout=%ds", serverAddr, shouldUseTLS, serverTimeout)
 		}
 
 		opts = append(opts, grpc.WithContextDialer(dialer))
 
 		startTime := time.Now()
-		conn, err := grpc.DialContext(context.Background(), "passthrough:///"+host, opts...)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(serverTimeout)*time.Second)
+		defer cancel()
+		conn, err := grpc.DialContext(ctx, "passthrough:///"+host, opts...)
 		if err != nil {
 			log.Printf("Failed to connect to %s: %v", address, err)
 			fmt.Printf("FAIL: server=%s ipv=%s ip=%s\n", serverAddr, IPVersionString, ip)
@@ -173,8 +234,6 @@ func checkServer(serverAddr string) {
 		}
 		defer conn.Close()
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(connectionTimeout)*time.Second)
-		defer cancel()
 		client := walletrpc.NewCompactTxStreamerClient(conn)
 
 		result, err := client.GetLightdInfo(ctx, &walletrpc.Empty{})
@@ -205,4 +264,15 @@ func unaryInterceptor(ctx context.Context, method string, req, reply interface{}
 func formatDuration(d time.Duration) string {
 	ms := float64(d) / float64(time.Millisecond)
 	return fmt.Sprintf("%.2fms", ms)
+}
+
+// isPortOpen checks if a TCP port is open and accepting connections at the given address
+func isPortOpen(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		log.Debugf("Port check failed for %s: %v", addr, err)
+		return false
+	}
+	conn.Close()
+	return true
 }

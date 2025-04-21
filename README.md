@@ -46,8 +46,7 @@ Prerequisite: Install Tor Browser and leave it open (for port 9150), or install 
 TLS is not typical over Tor since the domain name itself authenticates the remote server and traffic is always encrypted to the destination. It is also difficult to obtain SSL certificates for Tor .onion domains, only Digicert offers them at the moment. LetsEncrypt does not support Tor.
 
 ```
-./zecping -socks=127.0.0.1:9150 -timeout=30 -addr=hyv2mkrajusr3zutq2ikcwuxyn6azrkthom6hzh7d5xxxgors44dshid.onion:80 -tls=false
-./zecping -socks=127.0.0.1:9150 -timeout=30 -addr=hyv2mkrajusr3zutq2ikcwuxyn6azrkthom6hzh7d5xxxgors44dshid.onion:443 -tls=true -insecure
+./zecping -socks localhost:9150 -addr lzzfytqg24a7v6ejqh2q4ecaop6mf62gupvdimc4ryxeixtdtzxxjmad.onion:443
 ```
 
 Tunneling requests to sites other than Tor hidden services is also supported, useful to see if they are blocking Tor exits:
