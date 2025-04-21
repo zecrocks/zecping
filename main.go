@@ -161,7 +161,11 @@ func main() {
 
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			serverChan <- scanner.Text()
+			line := scanner.Text()
+			if line == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			serverChan <- line
 		}
 
 		if err := scanner.Err(); err != nil {
