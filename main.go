@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	concurrency       int
 	verbose           bool
 	showDonation      bool
+	showHeaders       bool
 )
 
 func init() {
@@ -48,6 +50,7 @@ func init() {
 	flag.IntVar(&concurrency, "concurrency", 20, "Number of parallel requests to make at a time")
 	flag.BoolVar(&verbose, "v", false, "Enable verbose logging")
 	flag.BoolVar(&showDonation, "donation", false, "Show server donation address if available")
+	flag.BoolVar(&showHeaders, "headers", false, "Show gRPC response headers/metadata")
 }
 
 func main() {
@@ -262,7 +265,8 @@ func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksP
 
 		client := walletrpc.NewCompactTxStreamerClient(conn)
 
-		result, err := client.GetLightdInfo(ctx, &walletrpc.Empty{})
+		var header, trailer metadata.MD
+		result, err := client.GetLightdInfo(ctx, &walletrpc.Empty{}, grpc.Header(&header), grpc.Trailer(&trailer))
 		if err != nil {
 			log.Printf("Could not get lightd info from %s: %v", address, err)
 			fmt.Printf("FAIL: server=%s ipv=%s ip=%s\n", serverAddr, IPVersionString, ip)
@@ -276,6 +280,16 @@ func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksP
 				output += fmt.Sprintf(" donation=%s", result.DonationAddress)
 			}
 			fmt.Println(output)
+			if showHeaders {
+				fmt.Println("  Response Headers:")
+				for k, v := range header {
+					fmt.Printf("    %s: %s\n", k, strings.Join(v, ", "))
+				}
+				fmt.Println("  Response Trailers:")
+				for k, v := range trailer {
+					fmt.Printf("    %s: %s\n", k, strings.Join(v, ", "))
+				}
+			}
 		}
 	}
 }
