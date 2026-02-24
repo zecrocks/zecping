@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +39,7 @@ var (
 	verbose           bool
 	showDonation      bool
 	showHeaders       bool
+	useHosh           bool
 )
 
 func init() {
@@ -51,6 +56,7 @@ func init() {
 	flag.BoolVar(&verbose, "v", false, "Enable verbose logging")
 	flag.BoolVar(&showDonation, "donation", false, "Show server donation address if available")
 	flag.BoolVar(&showHeaders, "headers", false, "Show gRPC response headers/metadata")
+	flag.BoolVar(&useHosh, "hosh", false, "Fetch and ping all servers from hosh.zec.rocks API")
 }
 
 func main() {
@@ -61,8 +67,8 @@ func main() {
 		log.SetLevel(log.WarnLevel)
 	}
 
-	if serverAddr == "" && configFile == "" {
-		log.Warn("Error: -addr or -import must be specified")
+	if serverAddr == "" && configFile == "" && !useHosh {
+		log.Warn("Error: -addr, -import, or -hosh must be specified")
 		flag.PrintDefaults()
 		return
 	}
@@ -155,7 +161,9 @@ func main() {
 
 	if serverAddr != "" {
 		serverChan <- serverAddr
-	} else {
+	}
+
+	if configFile != "" {
 		file, err := os.Open(configFile)
 		if err != nil {
 			log.Fatalf("Failed to open server list file: %v", err)
@@ -176,14 +184,66 @@ func main() {
 		}
 	}
 
+	if useHosh {
+		servers, err := fetchHoshServers()
+		if err != nil {
+			log.Fatalf("Failed to fetch servers from hosh.zec.rocks: %v", err)
+		}
+		for _, addr := range servers {
+			serverChan <- addr
+		}
+	}
+
 	close(serverChan)
 	wg.Wait()
+}
+
+type hoshResponse struct {
+	Servers []hoshServer `json:"servers"`
+}
+
+type hoshServer struct {
+	Hostname string `json:"hostname"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+}
+
+func fetchHoshServers() ([]string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get("https://hosh.zec.rocks/api/v0/zec.json")
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var data hoshResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	var addrs []string
+	for _, s := range data.Servers {
+		if s.Protocol != "grpc" {
+			continue
+		}
+		addrs = append(addrs, net.JoinHostPort(s.Hostname, strconv.Itoa(s.Port)))
+	}
+
+	log.Infof("Fetched %d gRPC servers from hosh.zec.rocks", len(addrs))
+	return addrs, nil
 }
 
 func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksProxy string) {
 	host, port, err := net.SplitHostPort(serverAddr)
 	if err != nil {
-		log.Fatalf("Failed to parse host and port: %v", err)
+		log.Errorf("Failed to parse host and port for %s: %v", serverAddr, err)
+		fmt.Printf("FAIL: server=%s reason=invalid_address\n", serverAddr)
+		return
 	}
 
 	isOnionAddress := strings.HasSuffix(host, ".onion")
@@ -191,12 +251,16 @@ func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksP
 	var ips []net.IP
 	if socksProxy == "" {
 		if isOnionAddress {
-			log.Fatalf("Cannot connect to .onion address without a SOCKS proxy. Use -socks option.")
+			log.Errorf("Cannot connect to %s without a SOCKS proxy. Use -socks option.", serverAddr)
+			fmt.Printf("FAIL: server=%s reason=no_socks_proxy\n", serverAddr)
+			return
 		}
 
 		ips, err = net.LookupIP(host)
 		if err != nil {
-			log.Fatalf("Failed to lookup IP addresses for host: %v", err)
+			log.Errorf("Failed to lookup IP addresses for %s: %v", host, err)
+			fmt.Printf("FAIL: server=%s reason=dns_resolution_failed\n", serverAddr)
+			return
 		}
 	} else {
 		// Add a placeholder IP just to enter the loop below
@@ -241,7 +305,9 @@ func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksP
 		} else {
 			socksDialer, err := proxy.SOCKS5("tcp", socksProxy, nil, proxy.Direct)
 			if err != nil {
-				log.Fatalf("Failed to create SOCKS5 dialer: %v", err)
+				log.Errorf("Failed to create SOCKS5 dialer for %s: %v", serverAddr, err)
+			fmt.Printf("FAIL: server=%s reason=socks_dialer_error\n", serverAddr)
+			return
 			}
 			dialer = func(ctx context.Context, addr string) (net.Conn, error) {
 				// Pass through the hostname and port from the CLI argument to let the proxy resolve DNS
