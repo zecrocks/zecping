@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -39,6 +40,7 @@ var (
 	verbose           bool
 	showDonation      bool
 	showHeaders       bool
+	showBlockHash     bool
 	useHosh           bool
 )
 
@@ -56,6 +58,7 @@ func init() {
 	flag.BoolVar(&verbose, "v", false, "Enable verbose logging")
 	flag.BoolVar(&showDonation, "donation", false, "Show server donation address if available")
 	flag.BoolVar(&showHeaders, "headers", false, "Show gRPC response headers/metadata")
+	flag.BoolVar(&showBlockHash, "blockhash", false, "Show the latest block hash (truncated); makes an extra GetLatestBlock call")
 	flag.BoolVar(&useHosh, "hosh", false, "Fetch and ping all servers from hosh.zec.rocks API")
 }
 
@@ -345,6 +348,15 @@ func checkServer(serverAddr string, shouldUseTLS bool, serverTimeout int, socksP
 			if showDonation {
 				output += fmt.Sprintf(" donation=%s", result.DonationAddress)
 			}
+			if showBlockHash {
+				latest, blockErr := client.GetLatestBlock(ctx, &walletrpc.ChainSpec{})
+				if blockErr != nil {
+					log.Printf("Could not get latest block from %s: %v", address, blockErr)
+					output += " blockhash=unavailable"
+				} else {
+					output += fmt.Sprintf(" blockhash=%s", formatBlockHash(latest.Hash))
+				}
+			}
 			fmt.Println(output)
 			if showHeaders {
 				fmt.Println("  Response Headers:")
@@ -365,6 +377,20 @@ func unaryInterceptor(ctx context.Context, method string, req, reply interface{}
 	err := invoker(ctx, method, req, reply, cc, opts...)
 	log.Printf("RPC call to method %s took %v", method, time.Since(startTime))
 	return err
+}
+
+// formatBlockHash renders a block hash for display. Zcash presents block hashes
+// in reverse byte order relative to the wire encoding, so we reverse the bytes
+// before hex-encoding to match block explorers.
+func formatBlockHash(hash []byte) string {
+	if len(hash) == 0 {
+		return "unavailable"
+	}
+	reversed := make([]byte, len(hash))
+	for i, b := range hash {
+		reversed[len(hash)-1-i] = b
+	}
+	return hex.EncodeToString(reversed)
 }
 
 func formatDuration(d time.Duration) string {

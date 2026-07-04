@@ -39,6 +39,11 @@ For example, to see which servers support IPv6, run this on a connection that su
 ./zecping -import servers.txt -ipv6
 ```
 
+To also show the latest block hash (truncated) each server reports, add `-blockhash`. This makes an extra `GetLatestBlock` call per server:
+```
+./zecping -addr zec.rocks:443 -blockhash
+```
+
 ### SOCKS support (Tor)
 
 Prerequisite: Install Tor Browser and leave it open (for port 9150), or install the Tor daemon on your local machine (and use port 9050).
@@ -61,6 +66,8 @@ Tunneling requests to sites other than Tor hidden services is also supported, us
 Usage of ./zecping:
   -addr string
     	Zcash Lightwalletd server address in the format of host:port
+  -blockhash
+    	Show the latest block hash (truncated); makes an extra GetLatestBlock call
   -import string
     	Check all servers in a newline-delimited text file
   -insecure
